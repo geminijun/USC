@@ -29,6 +29,14 @@
 
 using namespace std;
 
+#include "exception.h"
+
+Lock* lockTableLock = new Lock("lockTableLock");
+Lock* cvTableLock = new Lock("cvTableLock");
+
+Table lockTable(MAX_LOCKS);
+Table cvTable(MAX_LOCKS);
+
 int copyin(unsigned int vaddr, int len, char *buf) {
     // Copy len bytes from the current thread's virtual address vaddr.
     // Return the number of bytes so read, or -1 if an error occors.
@@ -231,6 +239,186 @@ void Close_Syscall(int fd) {
     }
 }
 
+int CreateLock_Syscall(int name, int len)
+{
+
+	lockTableLock->Acquire();
+	
+	// create a user lock
+	LockEntry* newLock = new LockEntry();
+	newLock->lock = new Lock("LockEntry");
+	newLock->lockSpace = currentThread->space;
+	newLock->isToDelete = false;
+
+	// put it into lock table	
+	int id = lockTable.Put(newLock);
+	if (id == -1) { // failed
+		DEBUG('a', "Create lock failed.\n");
+		delete newLock->lock;
+		delete newLock;
+	}
+	
+	lockTableLock->Release();
+	return id;
+}	
+
+void DestroyLock_Syscall(int id)
+{
+	lockTableLock->Acquire();
+	
+	LockEntry* l = (LockEntry*)lockTable.Get(id);
+	if(l == NULL) {
+		printf("The lock %d is not exist.\n", id);
+	} else {
+		if (l->usrCount == 0) {
+			if (l->lock != NULL) {
+				delete l->lock;
+			}
+			delete l;
+			lockTable.Remove(id);
+		} else { // someone else is still using the lock
+			printf("Couldn't destroy the lock.\n");
+			l->isToDelete = true;
+		}
+	}
+	
+	lockTableLock->Release();
+}
+
+void Acquire_Syscall(int id)
+{
+	lockTableLock->Acquire();
+	
+	LockEntry* l = (LockEntry*)lockTable.Get(id);
+	if(l == NULL) {
+		printf("The lock %d is not exist.\n", id);
+		lockTableLock->Release();
+	} else {
+		l->usrCount++;
+		lockTableLock->Release(); // must be released before acquire
+		l->lock->Acquire();
+	}
+}
+
+void Release_Syscall(int id)
+{
+	lockTableLock->Acquire();
+	
+	LockEntry* l = (LockEntry*)lockTable.Get(id);
+	if(l == NULL) {
+		printf("The lock %d is not exist.\n", id);
+	} else {
+		if (l->lock->owner == currentThread) {
+			l->usrCount--;
+			l->lock->Release();
+		} else {
+			DEBUG('a', "currentThread \"%s\" didn't hold the lock. The owner is \"%s\"\n",
+			  currentThread->getName(), l->lock->owner->getName());
+		}
+	}
+	
+	lockTableLock->Release();
+}	
+
+int CreateCondition_Syscall(int name, int len)
+{
+	cvTableLock->Acquire();
+	
+	// new cv
+	ConditionEntry* cv = new ConditionEntry();
+	cv->cv = new Condition("Condition");
+	cv->cvSpace = currentThread->space;
+	cv->isToDelete = false;
+	cv->usrCount = 0;
+
+	int id = cvTable.Put(cv);
+	if (id == -1) {
+		printf("Create condition variable failed.\n");
+		delete cv->cv;
+		delete cv;
+	}
+	
+	cvTableLock->Release();
+
+	return id;
+}
+
+void DestroyCondition_Syscall(int id)
+{
+	cvTableLock->Acquire();
+	
+	ConditionEntry* cv = (ConditionEntry *)cvTable.Get(id);
+	if (cv == NULL) {
+		printf("Condition variable %d isn't exist.\n", id);
+	} else {
+		if (cv->usrCount == 0) {
+			delete cv->cv;
+			delete cv;
+			cvTable.Remove(id);
+		} else {
+			printf("Someone else is still using condition variable %d.\n", id);
+			cv->isToDelete = true;
+		}
+	}
+
+	cvTableLock->Release();
+}
+
+void Wait_Syscall(int lockId, int cvId)
+{
+	cvTableLock->Acquire();
+	
+	ConditionEntry* cv = (ConditionEntry *)cvTable.Get(cvId);
+	LockEntry* l = (LockEntry *)lockTable.Get(lockId);
+	if (cv == NULL || l == NULL) {
+		printf("Lock %d isn't exist.\n", lockId);
+		printf("Condition variable %d isn't exist.\n", cvId);
+		cvTableLock->Release();
+	} else {
+		cv->usrCount++;
+		cvTableLock->Release(); // must be released before wait
+		cv->cv->Wait(l->lock);
+		
+		// reduce the count when wake up
+		cvTableLock->Acquire();
+		cv->usrCount--;
+		cvTableLock->Release();
+	}
+}
+
+void Signal_Syscall(int lockId, int cvId)
+{
+	cvTableLock->Acquire();
+	
+	ConditionEntry* cv = (ConditionEntry *)cvTable.Get(cvId);
+	LockEntry* l = (LockEntry *)lockTable.Get(lockId);
+	if (cv == NULL || l == NULL) {
+		printf("Lock %d isn't exist.\n", lockId);
+		printf("Condition variable %d isn't exist.\n", cvId);
+	} else {
+		cv->cv->Signal(l->lock);
+	}
+
+	cvTableLock->Release();
+}
+
+void Broadcast_Syscall(int lockId, int cvId)
+{
+	cvTableLock->Acquire();
+	
+	ConditionEntry* cv = (ConditionEntry *)cvTable.Get(cvId);
+	LockEntry* l = (LockEntry *)lockTable.Get(lockId);
+	if (cv == NULL || l == NULL) {
+		printf("Lock %d isn't exist.\n", lockId);
+		printf("Condition variable %d isn't exist.\n", cvId);
+	} else {
+		cv->cv->Broadcast(l->lock);
+	}
+
+	cvTableLock->Release();
+}
+
+
 void ExceptionHandler(ExceptionType which) {
     int type = machine->ReadRegister(2); // Which syscall?
     int rv=0; 	// the return value from a syscall
@@ -266,6 +454,44 @@ void ExceptionHandler(ExceptionType which) {
 	    case SC_Close:
 		DEBUG('a', "Close syscall.\n");
 		Close_Syscall(machine->ReadRegister(4));
+		break;
+
+	    case SC_CreateLock:
+		DEBUG('a', "Create lock syscall.\n");
+		rv = CreateLock_Syscall(machine->ReadRegister(4), machine->ReadRegister(5));
+		break;
+	    case SC_DestroyLock:
+		DEBUG('a', "Destroy lock syscall.\n");
+		DestroyLock_Syscall(machine->ReadRegister(4));
+		break;
+	    case SC_Acquire:
+		DEBUG('a', "Acquire lock syscall.\n");
+		Acquire_Syscall(machine->ReadRegister(4));
+		break;
+	    case SC_Release:
+		DEBUG('a', "Release lock syscall.\n");
+		Release_Syscall(machine->ReadRegister(4));
+		break;
+
+	    case SC_CreateCondition:
+		DEBUG('a', "Create condition variable syscall.\n");
+		rv = CreateCondition_Syscall(machine->ReadRegister(4), machine->ReadRegister(5));
+		break;
+	    case SC_DestroyCondition:
+		DEBUG('a', "Destroy condition variable syscall.\n");
+		DestroyLock_Syscall(machine->ReadRegister(4));
+		break;
+	    case SC_Wait:
+		DEBUG('a', "Wait condition variable syscall.\n");
+		Wait_Syscall(machine->ReadRegister(4), machine->ReadRegister(5));
+		break;
+	    case SC_Signal:
+		DEBUG('a', "Signal condition variable syscall.\n");
+		Signal_Syscall(machine->ReadRegister(4), machine->ReadRegister(5));
+		break;
+	    case SC_Broadcast:
+		DEBUG('a', "Broadcast condition variable syscall.\n");
+		Broadcast_Syscall(machine->ReadRegister(4), machine->ReadRegister(5));
 		break;
 	}
 

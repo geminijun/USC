@@ -77,6 +77,7 @@ class Lock {
 					// checking in Release, and in
 					// Condition variable ops below.
 
+	Thread* owner;  // lock's owner
   private:
     char* name;				// for debugging
     // plus some other stuff you'll need to define	
@@ -85,7 +86,6 @@ class Lock {
 	enum LockStatus { FREE, BUSY };
 	LockStatus lockstatus;
 	
-	Thread* owner;  // lock's owner
 };
 
 

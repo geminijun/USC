@@ -7,6 +7,11 @@
 
 extern void ThreadTest(void);
 extern void DisplayData(void);
+extern void Test1();
+extern void Test2();
+extern void Test3();
+extern void Test4();
+extern void Test5();
 
 // defining all the maximum allowable values for different entities.
 #define MAX_NO_SALESMAN 3
@@ -58,8 +63,8 @@ int currentCashierItemsNo[MAX_NO_CASHIER];
 int currentCashierMoney[MAX_NO_CASHIER];
 
 
-Lock* custCashierWaitingLineLock;
-//Lock *custCashierWaitingLineLock[MAX_NO_CASHIER]; //lock variable 1 for each cashier line.
+//Lock* custCashierWaitingLineLock;
+Lock *custCashierWaitingLineLock[MAX_NO_CASHIER]; //lock variable 1 for each cashier line.
 Condition *custCashierWaitingLineCV[MAX_NO_CASHIER]; // condition variable 1 for each customer waiting line
 Condition *cashierCV[MAX_NO_CASHIER]; // condition variable for each cashier waiting
 int custCashierWaitingLineCount[MAX_NO_CASHIER]; // waiting line for each cashier 
@@ -92,7 +97,7 @@ Lock* managerLock;
 Condition* managerCV;
 int managerstatus;  // 0 means free, 1 means interacting with 
 
-
+int initMoney = 400;
 // --------------------------------------------------
 // Customer - Salesman - Monitor (Functions)
 // --------------------------------------------------
@@ -142,7 +147,7 @@ void thread_customer(int myIndex) {
 		}
 		else
 		{
-			printf("Customer [%d] gets in line for a trolly", myIndex+1);
+			printf("Customer [%d] gets in line for a trolly\n", myIndex+1);
 			findTrollyCV.Wait(&findTrollyLock);
 		}
 	}
@@ -311,16 +316,18 @@ void thread_customer(int myIndex) {
 		if(cashierStatus[myCashier] == 0)
 		{
 			cashierStatus[myCashier] = 1;
-//			cashierCV[myCashier]->Signal(custCashierWaitingLineLock[myCashier]);
+//			cashierCV[myCashier]->Signal(cashierMsgLock[myCashier]);
 		}
 		
 		if(cashierStatus[myCashier] == 1)
 		{
+			cashierMsgLock[myCashier]->Acquire();
 			printf("Customer [%d] i am waiting in the line of cashier [%d]\n",myIndex+1,myCashier+1 );
-			custCashierWaitingLineCV[myCashier]->Wait(custCashierWaitingLineLock[myCashier]);
+			custCashierWaitingLineCV[myCashier]->Wait(cashierMsgLock[myCashier]);
+			cashierMsgLock[myCashier]->Release();
 		}
 		
-		cashierCV[myCashier]->Signal(custCashierWaitingLineLock[myCashier]);
+		cashierCV[myCashier]->Signal(cashierMsgLock[myCashier]);
 
 		custCashierWaitingLineLock[myCashier]->Release();
 
@@ -334,17 +341,17 @@ void thread_customer(int myIndex) {
 	}
 	
 	// inform cashier to pay
-	cashierCV[myCashier]->Signal(custCashierWaitingLineLock[myCashier]);
+	cashierCV[myCashier]->Signal(cashierMsgLock[myCashier]);
 		
 	// waiting for cashier's scanning
-	cashierCV[myCashier]->Wait(custCashierWaitingLineLock[myCashier]);
+	cashierCV[myCashier]->Wait(cashierMsgLock[myCashier]);
 	
-	if (currentCashierMoney[myCashier] <= 400) {
-		printf("Customer [%d] pays [%d] to Cashier [%d] and is now waiting for receipt.", myIndex, needMoney, myCashier);
-		cashierCV[myCashier]->Wait(custCashierWaitingLineLock[myCashier]);	
+	if (currentCashierMoney[myCashier] <= initMoney) {
+		printf("Customer [%d] pays [%d] to Cashier [%d] and is now waiting for receipt.", myIndex, currentCashierMoney[myCashier], myCashier);
+		cashierCV[myCashier]->Wait(cashierMsgLock[myCashier]);	
 		printf("Customer [%d] got receipt from Cashier [%d] and is now leaving", myIndex, myCashier);
 	} else {
-		printf("Customer [%d] cannot pay [%d]", myIndex, needMoney);
+		printf("Customer [%d] cannot pay [%d]", myIndex, currentCashierMoney[myCashier]);
 		// don't have enough money, signal manager to process
 		// reduce the bill until enough
 		printf("Customer [%d] is waiting for Manager for negotiations.", myIndex);
@@ -356,7 +363,7 @@ void thread_customer(int myIndex) {
 		{
 			printf("Customer [%d] tells Manager to remove [%d] from trolly", myIndex, myItemsIDs[i]);
 			needMoney -= (myItemsIDs[i]+1)*10;
-			if (needMoney <= 400) {
+			if (needMoney <= initMoney) {
 				salesMoneyLock->Acquire();
 				salesMoney += needMoney;
 				salesMoneyLock->Release();
@@ -375,13 +382,14 @@ void thread_customer(int myIndex) {
 	trollyLeft++;
 	findTrollyCV.Broadcast(&findTrollyLock); 
 	findTrollyLock.Release();
+	printf("Customer [%d] return trolly and leave", myIndex);
 }
 
 void thread_manager() {
 	while (true) {
 		managerLock->Acquire();
 		if (managerstatus = 0) {
-			<#statements#>
+//			<#statements#>
 		}
 		managerCV->Wait(managerLock);
 		 
@@ -548,6 +556,7 @@ void thread_salesman(int myID) {
 void thread_cashier(int myIndex) {
 	
 	while (true) {
+		printf("Cashier [");
 		cashierMsgLock[myIndex]->Acquire();
 		// if the cashier's status is on Break
 		if (cashierStatus[myIndex] == 2) {
@@ -563,11 +572,11 @@ void thread_cashier(int myIndex) {
 			cashierStatus[myIndex] == 0;
 		}
 		// wake up by customer
-		else if (cashierStatus[myIndex] == 1) {
+		else if ((cashierStatus[myIndex] == 1) || (cashierStatus[myIndex] == 0)) {
 			
 			// calculate the bill
 			int needMoney=0;
-			for (int i = 0; i < currentCasherItemsNo[myIndex]; i++) {
+			for (int i = 0; i < currentCashierItemsNo[myIndex]; i++) {
 				currentCashierCus[myIndex];
 				printf("Cashier [%d] got [%d] from trolly of Customer [%d].", myIndex, currentCashierItems[myIndex][i], currentCashierCus[myIndex]);
 				needMoney += (currentCashierItems[myIndex][i]+1)*10;
@@ -580,7 +589,7 @@ void thread_cashier(int myIndex) {
 			
 			// wait for customer to pay
 			cashierCV[myIndex]->Wait(cashierMsgLock[myIndex]);
-			if (needMoney > 400) {
+			if (needMoney > initMoney) {
 				// inform manager
 				printf("Cashier [%d] asks Customer [%d] to wait for Manager.", myIndex, currentCashierCus[myIndex]);
 				
@@ -588,7 +597,7 @@ void thread_cashier(int myIndex) {
 			}
 			else {
 				printf("Cashier [%d] got money $[%d] from Customer [%d].", myIndex, needMoney, currentCashierCus[myIndex]);
-				counter[myCashier] += needMoney; // one customer at one cashier, there would be any conflict
+				counter[myIndex] += needMoney; // one customer at one cashier, there would be any conflict
 			}
 			
 			// give customer recipe and tell him leave
@@ -665,7 +674,7 @@ void thread_cashier(int myIndex) {
 		//salesmanStatus[myDepartment][myIndex] = 0;
 		//custWaitingLineLock[myDepartment]->Release();
 		//salesmanLock[myIndex]->Acquire();
-	}
+//	}
 	// now it waits for some customer to come or waits that the customer has successfully entered the market .. goes to sleep.
 	//salesmanStatus[myIndex] = 3;
 	//printf ("\ntest\n");
@@ -715,7 +724,7 @@ void thread_cashier(int myIndex) {
 
 
 
-void startMenu()
+void Problem2()
 {
 	int choice = 13;
 	int exitDecider = 0;
@@ -731,12 +740,12 @@ void startMenu()
 		printf("\n\t\t\t\t\t Please select from the below options");
 		printf("\n\t\t\t\t\t ------------------------------------\n\n");
 		printf("\n\t\t\t\t\t   1. \t Run the Complete Simulation");
-		printf("\n\t\t\t\t\t   2. \t Run Test 1");
-		printf("\n\t\t\t\t\t   3. \t Run Test 2");
-		printf("\n\t\t\t\t\t   4. \t Run Test 3");
-		printf("\n\t\t\t\t\t   5. \t Run Test 4");
-		printf("\n\t\t\t\t\t   6. \t Run Test 5");
-		printf("\n\t\t\t\t\t   7. \t Run Test 6");
+		printf("\n\t\t\t\t\t   2. \t Run Test 1(No. of customers more than trollies)");
+		printf("\n\t\t\t\t\t   3. \t Run Test 2(item are easy to be out of stock)");
+		printf("\n\t\t\t\t\t   4. \t Run Test 3(minimum requirement)");
+		printf("\n\t\t\t\t\t   5. \t Run Test 4(manager frequently send cashier to break)");
+		printf("\n\t\t\t\t\t   6. \t Run Test 5(Customer has little amount of money will call manager)");
+		printf("\n\t\t\t\t\t   7. \t Run Test 6(Customer will always chose the shorest line)");
 		printf("\n\t\t\t\t\t   8. \t Run Test 7");
 		printf("\n\t\t\t\t\t   9. \t Run Test 8");
 		printf("\n\t\t\t\t\t   10. \t Run Test 9");
@@ -752,27 +761,32 @@ void startMenu()
 		
 		case 1 :
 			ThreadTest();
-			//exitDecider = 1;
+			exitDecider = 1;
 			break;
 		case 2 :
 			//DisplayData();
 			printf("Work in progress 2.");
+			Test1();
 			exitDecider = 1;
 			break;
 		case 3 :
 			printf("Work in progress 3.");
+			Test2();
 			exitDecider = 1;
 			break;
 		case 4 :
 			printf("Work in progress 4.");
+			Test3();
 			exitDecider = 1;
 			break;
 		case 5 :
 			printf("Work in progress 5.");
+			Test4();
 			exitDecider = 1;
 			break;
 		case 6 :
 			printf("Work in progress 6.");
+			Test5();
 			exitDecider = 1;
 			break;
 		case 7 :
@@ -824,8 +838,621 @@ void DisplayData()
 	}
 }
 
+// init money = 100
+void Test5() {
+    Thread *t;
+    
+	char *name;
+    int i,j;
+		
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("\n how are you");
+	//scanf("%d",&i);
+		
+	//intialize the total number of items left to 20 and set there price	
+	for (i=0;i<MAX_NO_DEPARTMENT ;i++)
+	{
+		for(j=0;j<NO_OF_ITEMS;j++)
+		{
+			itemLeft[i][j] = 20;
+			itemPrice[i][j] = (j+1)*10;
+		}
+	}
+	
+	//intialize the locks and condition varialbles as well as the salesmanStatus to busy
+	for (i=0;i<MAX_NO_DEPARTMENT ;i++)
+	{
+		for (j=0 ; j<MAX_NO_SALESMAN; j++)
+		{
+		name = new char [20];
+		sprintf(name,"sales_lock_%d",i);
+		salesmanLock[i][j] = new Lock(name);
+		sprintf(name,"sales_cv_%d",i);
+		salesmanCV[i][j] = new Condition(name);
+		salesmanStatus[i][j]=1;
+		}
+	}
+	
+	
+	
+	//intialize all  the waiting queue to 0 count and intialize there respective locks and condition variables
+	for(i=0;i<MAX_NO_DEPARTMENT;i++)
+	{
+		name = new char [20];
+		sprintf(name,"custwaitingline_lock_%d",i);
+		custWaitingLineLock[i] = new Lock(name);
+		sprintf(name,"custwaitingline_cv_%d",i);
+		custWaitingLineCV[i] = new Condition(name);
+		custWaitingLineCount[i]=0;
+	}
+	
+	
+	
+	//Lock *deptShoppingLock[MAX_NO_DEPARTMENT];
+	
+	for(i=0;i<MAX_NO_DEPARTMENT;i++)
+	{
+		name = new char [20];
+		sprintf(name,"deptshopping_lock_%d",i);
+		deptShoppingLock[i] = new Lock(name);
+		sprintf(name,"deptshopping_cv_%d",i);
+		deptShoppingCV[i] = new Condition(name);
+		//custWaitingLineCount[i]=0;
+	}
+	
+	//inialising the cashier related locks, condition and count variables
+	for(i=0;i<MAX_NO_CASHIER; i++)
+	{
+		name = new char [20];
+		sprintf(name,"ccwaitline_lock_%d",i);
+		custCashierWaitingLineLock[i] = new Lock(name);
+		sprintf(name,"ccwaitine_cv_%d",i);
+		custCashierWaitingLineCV[i] = new Condition(name);
+		sprintf(name,"cashierwaiting_cv_%d",i);
+		cashierCV[i] = new Condition(name);
+		custCashierWaitingLineCount[i]=0;
+		cashierStatus[i] = 1;
+		
+		sprintf(name,"cashierMsgLock_%d",i);
+		cashierMsgLock[i] = new Lock(name);
+		
+	}
+		
+		
+	//simluation test for cust sales
+	printf("starting the simulation\n");
+	
+	// there are already 5 customer in the line 1~4
+	for( i = 0; i < 4; i++) {
+		custCashierWaitingLineCount[i] = 5;
+	}
 
+	// creating the customers 	
+	// this 5 customers will all chose line 5
+	for (  i = 0 ; i < 5 ; i++ )
+	{
+		name = new char [20];
+		sprintf(name,"customer_%d",i);
+		t = new Thread(name);
+		t->Fork((VoidFunctionPtr)thread_customer,i);
+    }
+	
+	// creating the salesman
+	for (  i = 0 ; i < 15 ; i++ ) 
+	{
+		
+		name = new char [20];
+		sprintf(name,"salesman_%d",i);
+		t = new Thread(name);
+		t->Fork((VoidFunctionPtr)thread_salesman,i);
+		
+	}
+	
+	//creating the cashiers
+	for (  i = 0 ; i < MAX_NO_CASHIER ; i++ ) 
+	{
+		
+		name = new char [20];
+		sprintf(name,"salesman_%d",i);
+		t = new Thread(name);
+		t->Fork((VoidFunctionPtr)thread_cashier,i);
+		
+	}
+	
+}
 
+// init money = 100
+void Test4() {
+    Thread *t;
+    
+	char *name;
+    int i,j;
+		
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("\n how are you");
+	//scanf("%d",&i);
+		
+	//intialize the total number of items left to 20 and set there price	
+	for (i=0;i<MAX_NO_DEPARTMENT ;i++)
+	{
+		for(j=0;j<NO_OF_ITEMS;j++)
+		{
+			itemLeft[i][j] = 20;
+			itemPrice[i][j] = (j+1)*10;
+		}
+	}
+	
+	//intialize the locks and condition varialbles as well as the salesmanStatus to busy
+	for (i=0;i<MAX_NO_DEPARTMENT ;i++)
+	{
+		for (j=0 ; j<MAX_NO_SALESMAN; j++)
+		{
+		name = new char [20];
+		sprintf(name,"sales_lock_%d",i);
+		salesmanLock[i][j] = new Lock(name);
+		sprintf(name,"sales_cv_%d",i);
+		salesmanCV[i][j] = new Condition(name);
+		salesmanStatus[i][j]=1;
+		}
+	}
+	
+	
+	
+	//intialize all  the waiting queue to 0 count and intialize there respective locks and condition variables
+	for(i=0;i<MAX_NO_DEPARTMENT;i++)
+	{
+		name = new char [20];
+		sprintf(name,"custwaitingline_lock_%d",i);
+		custWaitingLineLock[i] = new Lock(name);
+		sprintf(name,"custwaitingline_cv_%d",i);
+		custWaitingLineCV[i] = new Condition(name);
+		custWaitingLineCount[i]=0;
+	}
+	
+	
+	
+	//Lock *deptShoppingLock[MAX_NO_DEPARTMENT];
+	
+	for(i=0;i<MAX_NO_DEPARTMENT;i++)
+	{
+		name = new char [20];
+		sprintf(name,"deptshopping_lock_%d",i);
+		deptShoppingLock[i] = new Lock(name);
+		sprintf(name,"deptshopping_cv_%d",i);
+		deptShoppingCV[i] = new Condition(name);
+		//custWaitingLineCount[i]=0;
+	}
+	
+	//inialising the cashier related locks, condition and count variables
+	for(i=0;i<MAX_NO_CASHIER; i++)
+	{
+		name = new char [20];
+		sprintf(name,"ccwaitline_lock_%d",i);
+		custCashierWaitingLineLock[i] = new Lock(name);
+		sprintf(name,"ccwaitine_cv_%d",i);
+		custCashierWaitingLineCV[i] = new Condition(name);
+		sprintf(name,"cashierwaiting_cv_%d",i);
+		cashierCV[i] = new Condition(name);
+		custCashierWaitingLineCount[i]=0;
+		cashierStatus[i] = 1;
+		
+		sprintf(name,"cashierMsgLock_%d",i);
+		cashierMsgLock[i] = new Lock(name);
+		
+	}
+		
+		
+	//simluation test for cust sales
+	printf("starting the simulation\n");
+	
+	initMoney = 100;
+	// creating the customers 	
+	for (  i = 0 ; i < 15 ; i++ )
+	{
+		name = new char [20];
+		sprintf(name,"customer_%d",i);
+		t = new Thread(name);
+		t->Fork((VoidFunctionPtr)thread_customer,i);
+    }
+	
+	// creating the salesman
+	for (  i = 0 ; i < 15 ; i++ ) 
+	{
+		
+		name = new char [20];
+		sprintf(name,"salesman_%d",i);
+		t = new Thread(name);
+		t->Fork((VoidFunctionPtr)thread_salesman,i);
+		
+	}
+	
+	//creating the cashiers
+	for (  i = 0 ; i < MAX_NO_CASHIER ; i++ ) 
+	{
+		
+		name = new char [20];
+		sprintf(name,"salesman_%d",i);
+		t = new Thread(name);
+		t->Fork((VoidFunctionPtr)thread_cashier,i);
+		
+	}
+	
+}
+
+// there are only 3 item originally, so it's easy to be out of stock
+void Test3() {
+    Thread *t;
+    
+	char *name;
+    int i,j;
+		
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("\n how are you");
+	//scanf("%d",&i);
+		
+	//intialize the total number of items left to 20 and set there price	
+	for (i=0;i<3 ;i++)
+	{
+		for(j=0;j<NO_OF_ITEMS;j++)
+		{
+			itemLeft[i][j] = 3;
+			itemPrice[i][j] = (j+1)*10;
+		}
+	}
+	
+	//intialize the locks and condition varialbles as well as the salesmanStatus to busy
+	for (i=0;i<3 ;i++)
+	{
+		for (j=0 ; j<2; j++)
+		{
+		name = new char [20];
+		sprintf(name,"sales_lock_%d",i);
+		salesmanLock[i][j] = new Lock(name);
+		sprintf(name,"sales_cv_%d",i);
+		salesmanCV[i][j] = new Condition(name);
+		salesmanStatus[i][j]=1;
+		}
+	}
+
+	//intialize all  the waiting queue to 0 count and intialize there respective locks and condition variables
+	for(i=0;i<3;i++)
+	{
+		name = new char [20];
+		sprintf(name,"custwaitingline_lock_%d",i);
+		custWaitingLineLock[i] = new Lock(name);
+		sprintf(name,"custwaitingline_cv_%d",i);
+		custWaitingLineCV[i] = new Condition(name);
+		custWaitingLineCount[i]=0;
+	}
+	
+	
+	
+	//Lock *deptShoppingLock[MAX_NO_DEPARTMENT];
+	
+	for(i=0;i<3;i++)
+	{
+		name = new char [20];
+		sprintf(name,"deptshopping_lock_%d",i);
+		deptShoppingLock[i] = new Lock(name);
+		sprintf(name,"deptshopping_cv_%d",i);
+		deptShoppingCV[i] = new Condition(name);
+		//custWaitingLineCount[i]=0;
+	}
+	
+	//inialising the cashier related locks, condition and count variables
+	for(i=0;i<3; i++)
+	{
+		name = new char [20];
+		sprintf(name,"ccwaitline_lock_%d",i);
+		custCashierWaitingLineLock[i] = new Lock(name);
+		sprintf(name,"ccwaitine_cv_%d",i);
+		custCashierWaitingLineCV[i] = new Condition(name);
+		sprintf(name,"cashierwaiting_cv_%d",i);
+		cashierCV[i] = new Condition(name);
+		custCashierWaitingLineCount[i]=0;
+		cashierStatus[i] = 1;
+		
+		sprintf(name,"cashierMsgLock_%d",i);
+		cashierMsgLock[i] = new Lock(name);
+		
+	}
+		
+		
+	//simluation test for cust sales
+	printf("starting the simulation\n");
+	
+	// creating the customers 	
+	for (  i = 0 ; i < 30 ; i++ )
+	{
+		name = new char [20];
+		sprintf(name,"customer_%d",i);
+		t = new Thread(name);
+		t->Fork((VoidFunctionPtr)thread_customer,i);
+    }
+	
+	// creating the salesman
+	for (  i = 0 ; i < 6 ; i++ ) 
+	{
+		
+		name = new char [20];
+		sprintf(name,"salesman_%d",i);
+		t = new Thread(name);
+		t->Fork((VoidFunctionPtr)thread_salesman,i);
+		
+	}
+	
+	//creating the cashiers
+	for (  i = 0 ; i < 3 ; i++ ) 
+	{
+		
+		name = new char [20];
+		sprintf(name,"salesman_%d",i);
+		t = new Thread(name);
+		t->Fork((VoidFunctionPtr)thread_cashier,i);
+		
+	}
+	
+}
+
+// there are only 3 item originally, so it's easy to be out of stock
+void Test2() {
+    Thread *t;
+    
+	char *name;
+    int i,j;
+		
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("\n how are you");
+	//scanf("%d",&i);
+		
+	//intialize the total number of items left to 20 and set there price	
+	for (i=0;i<MAX_NO_DEPARTMENT ;i++)
+	{
+		for(j=0;j<NO_OF_ITEMS;j++)
+		{
+			itemLeft[i][j] = 3;
+			itemPrice[i][j] = (j+1)*10;
+		}
+	}
+	
+	//intialize the locks and condition varialbles as well as the salesmanStatus to busy
+	for (i=0;i<MAX_NO_DEPARTMENT ;i++)
+	{
+		for (j=0 ; j<MAX_NO_SALESMAN; j++)
+		{
+		name = new char [20];
+		sprintf(name,"sales_lock_%d",i);
+		salesmanLock[i][j] = new Lock(name);
+		sprintf(name,"sales_cv_%d",i);
+		salesmanCV[i][j] = new Condition(name);
+		salesmanStatus[i][j]=1;
+		}
+	}
+	
+	
+	
+	//intialize all  the waiting queue to 0 count and intialize there respective locks and condition variables
+	for(i=0;i<MAX_NO_DEPARTMENT;i++)
+	{
+		name = new char [20];
+		sprintf(name,"custwaitingline_lock_%d",i);
+		custWaitingLineLock[i] = new Lock(name);
+		sprintf(name,"custwaitingline_cv_%d",i);
+		custWaitingLineCV[i] = new Condition(name);
+		custWaitingLineCount[i]=0;
+	}
+	
+	
+	
+	//Lock *deptShoppingLock[MAX_NO_DEPARTMENT];
+	
+	for(i=0;i<MAX_NO_DEPARTMENT;i++)
+	{
+		name = new char [20];
+		sprintf(name,"deptshopping_lock_%d",i);
+		deptShoppingLock[i] = new Lock(name);
+		sprintf(name,"deptshopping_cv_%d",i);
+		deptShoppingCV[i] = new Condition(name);
+		//custWaitingLineCount[i]=0;
+	}
+	
+	//inialising the cashier related locks, condition and count variables
+	for(i=0;i<MAX_NO_CASHIER; i++)
+	{
+		name = new char [20];
+		sprintf(name,"ccwaitline_lock_%d",i);
+		custCashierWaitingLineLock[i] = new Lock(name);
+		sprintf(name,"ccwaitine_cv_%d",i);
+		custCashierWaitingLineCV[i] = new Condition(name);
+		sprintf(name,"cashierwaiting_cv_%d",i);
+		cashierCV[i] = new Condition(name);
+		custCashierWaitingLineCount[i]=0;
+		cashierStatus[i] = 1;
+		
+		sprintf(name,"cashierMsgLock_%d",i);
+		cashierMsgLock[i] = new Lock(name);
+		
+	}
+		
+		
+	//simluation test for cust sales
+	printf("starting the simulation\n");
+	
+	// creating the customers 	
+	for (  i = 0 ; i < 15 ; i++ )
+	{
+		name = new char [20];
+		sprintf(name,"customer_%d",i);
+		t = new Thread(name);
+		t->Fork((VoidFunctionPtr)thread_customer,i);
+    }
+	
+	// creating the salesman
+	for (  i = 0 ; i < 15 ; i++ ) 
+	{
+		
+		name = new char [20];
+		sprintf(name,"salesman_%d",i);
+		t = new Thread(name);
+		t->Fork((VoidFunctionPtr)thread_salesman,i);
+		
+	}
+	
+	//creating the cashiers
+	for (  i = 0 ; i < MAX_NO_CASHIER ; i++ ) 
+	{
+		
+		name = new char [20];
+		sprintf(name,"salesman_%d",i);
+		t = new Thread(name);
+		t->Fork((VoidFunctionPtr)thread_cashier,i);
+		
+	}
+	
+}
+
+// No. of customers more than trollies
+void Test1() {
+    Thread *t;
+    
+	char *name;
+    int i,j;
+		
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("Number of Cashiers = [%d]\n",MAX_NO_CASHIER);
+	//printf("\n how are you");
+	//scanf("%d",&i);
+		
+	//intialize the total number of items left to 20 and set there price	
+	for (i=0;i<MAX_NO_DEPARTMENT ;i++)
+	{
+		for(j=0;j<NO_OF_ITEMS;j++)
+		{
+			itemLeft[i][j] = 20;
+			itemPrice[i][j] = (j+1)*10;
+		}
+	}
+	
+	//intialize the locks and condition varialbles as well as the salesmanStatus to busy
+	for (i=0;i<MAX_NO_DEPARTMENT ;i++)
+	{
+		for (j=0 ; j<MAX_NO_SALESMAN; j++)
+		{
+		name = new char [20];
+		sprintf(name,"sales_lock_%d",i);
+		salesmanLock[i][j] = new Lock(name);
+		sprintf(name,"sales_cv_%d",i);
+		salesmanCV[i][j] = new Condition(name);
+		salesmanStatus[i][j]=1;
+		}
+	}
+	
+	
+	
+	//intialize all  the waiting queue to 0 count and intialize there respective locks and condition variables
+	for(i=0;i<MAX_NO_DEPARTMENT;i++)
+	{
+		name = new char [20];
+		sprintf(name,"custwaitingline_lock_%d",i);
+		custWaitingLineLock[i] = new Lock(name);
+		sprintf(name,"custwaitingline_cv_%d",i);
+		custWaitingLineCV[i] = new Condition(name);
+		custWaitingLineCount[i]=0;
+	}
+	
+	
+	
+	//Lock *deptShoppingLock[MAX_NO_DEPARTMENT];
+	
+	for(i=0;i<MAX_NO_DEPARTMENT;i++)
+	{
+		name = new char [20];
+		sprintf(name,"deptshopping_lock_%d",i);
+		deptShoppingLock[i] = new Lock(name);
+		sprintf(name,"deptshopping_cv_%d",i);
+		deptShoppingCV[i] = new Condition(name);
+		//custWaitingLineCount[i]=0;
+	}
+	
+	//inialising the cashier related locks, condition and count variables
+	for(i=0;i<MAX_NO_CASHIER; i++)
+	{
+		name = new char [20];
+		sprintf(name,"ccwaitline_lock_%d",i);
+		custCashierWaitingLineLock[i] = new Lock(name);
+		sprintf(name,"ccwaitine_cv_%d",i);
+		custCashierWaitingLineCV[i] = new Condition(name);
+		sprintf(name,"cashierwaiting_cv_%d",i);
+		cashierCV[i] = new Condition(name);
+		custCashierWaitingLineCount[i]=0;
+		cashierStatus[i] = 1;
+		
+		sprintf(name,"cashierMsgLock_%d",i);
+		cashierMsgLock[i] = new Lock(name);
+		
+	}
+		
+		
+	//simluation test for cust sales
+	printf("starting the simulation\n");
+	
+	trollyLeft = 5;
+	// creating the customers 	
+	for (  i = 0 ; i < 15 ; i++ )
+	{
+		name = new char [20];
+		sprintf(name,"customer_%d",i);
+		t = new Thread(name);
+		t->Fork((VoidFunctionPtr)thread_customer,i);
+    }
+	
+	// creating the salesman
+	for (  i = 0 ; i < 15 ; i++ ) 
+	{
+		
+		name = new char [20];
+		sprintf(name,"salesman_%d",i);
+		t = new Thread(name);
+		t->Fork((VoidFunctionPtr)thread_salesman,i);
+		
+	}
+	
+	//creating the cashiers
+	for (  i = 0 ; i < MAX_NO_CASHIER ; i++ ) 
+	{
+		
+		name = new char [20];
+		sprintf(name,"salesman_%d",i);
+		t = new Thread(name);
+		t->Fork((VoidFunctionPtr)thread_cashier,i);
+		
+	}
+	
+}
 
 void ThreadTest() {
     Thread *t;
@@ -901,10 +1528,8 @@ void ThreadTest() {
 		custCashierWaitingLineLock[i] = new Lock(name);
 		sprintf(name,"ccwaitine_cv_%d",i);
 		custCashierWaitingLineCV[i] = new Condition(name);
-		
 		sprintf(name,"cashierwaiting_cv_%d",i);
 		cashierCV[i] = new Condition(name);
-		
 		custCashierWaitingLineCount[i]=0;
 		cashierStatus[i] = 1;
 		
@@ -951,4 +1576,358 @@ void ThreadTest() {
 	
 	
 }
+
+// --------------------------------------------------
+// Test Suite
+// --------------------------------------------------
+
+
+// --------------------------------------------------
+// Test 1 - see TestSuite() for details
+// --------------------------------------------------
+Semaphore t1_s1("t1_s1",0);       // To make sure t1_t1 acquires the
+                                  // lock before t1_t2
+Semaphore t1_s2("t1_s2",0);       // To make sure t1_t2 Is waiting on the 
+                                  // lock before t1_t3 releases it
+Semaphore t1_s3("t1_s3",0);       // To make sure t1_t1 does not release the
+                                  // lock before t1_t3 tries to acquire it
+Semaphore t1_done("t1_done",0);   // So that TestSuite knows when Test 1 is
+                                  // done
+Lock t1_l1("t1_l1");		  // the lock tested in Test 1
+
+// --------------------------------------------------
+// t1_t1() -- test1 thread 1
+//     This is the rightful lock owner
+// --------------------------------------------------
+void t1_t1() {
+    t1_l1.Acquire();
+    t1_s1.V();  // Allow t1_t2 to try to Acquire Lock
+ 
+    printf ("%s: Acquired Lock %s, waiting for t3\n",currentThread->getName(),
+	    t1_l1.getName());
+    t1_s3.P();
+    printf ("%s: working in CS\n",currentThread->getName());
+    for (int i = 0; i < 1000000; i++) ;
+    printf ("%s: Releasing Lock %s\n",currentThread->getName(),
+	    t1_l1.getName());
+    t1_l1.Release();
+    t1_done.V();
+}
+
+// --------------------------------------------------
+// t1_t2() -- test1 thread 2
+//     This thread will wait on the held lock.
+// --------------------------------------------------
+void t1_t2() {
+
+    t1_s1.P();	// Wait until t1 has the lock
+    t1_s2.V();  // Let t3 try to acquire the lock
+
+    printf("%s: trying to acquire lock %s\n",currentThread->getName(),
+	    t1_l1.getName());
+    t1_l1.Acquire();
+
+    printf ("%s: Acquired Lock %s, working in CS\n",currentThread->getName(),
+	    t1_l1.getName());
+    for (int i = 0; i < 10; i++)
+	;
+    printf ("%s: Releasing Lock %s\n",currentThread->getName(),
+	    t1_l1.getName());
+    t1_l1.Release();
+    t1_done.V();
+}
+
+// --------------------------------------------------
+// t1_t3() -- test1 thread 3
+//     This thread will try to release the lock illegally
+// --------------------------------------------------
+void t1_t3() {
+
+    t1_s2.P();	// Wait until t2 is ready to try to acquire the lock
+
+    t1_s3.V();	// Let t1 do it's stuff
+    for ( int i = 0; i < 3; i++ ) {
+	printf("%s: Trying to release Lock %s\n",currentThread->getName(),
+	       t1_l1.getName());
+	t1_l1.Release();
+    }
+}
+
+// --------------------------------------------------
+// Test 2 - see TestSuite() for details
+// --------------------------------------------------
+Lock t2_l1("t2_l1");		// For mutual exclusion
+Condition t2_c1("t2_c1");	// The condition variable to test
+Semaphore t2_s1("t2_s1",0);	// To ensure the Signal comes before the wait
+Semaphore t2_done("t2_done",0);     // So that TestSuite knows when Test 2 is
+                                  // done
+
+// --------------------------------------------------
+// t2_t1() -- test 2 thread 1
+//     This thread will signal a variable with nothing waiting
+// --------------------------------------------------
+void t2_t1() {
+    t2_l1.Acquire();
+    printf("%s: Lock %s acquired, signalling %s\n",currentThread->getName(),
+	   t2_l1.getName(), t2_c1.getName());
+    t2_c1.Signal(&t2_l1);
+    printf("%s: Releasing Lock %s\n",currentThread->getName(),
+	   t2_l1.getName());
+    t2_l1.Release();
+    t2_s1.V();	// release t2_t2
+    t2_done.V();
+}
+
+// --------------------------------------------------
+// t2_t2() -- test 2 thread 2
+//     This thread will wait on a pre-signalled variable
+// --------------------------------------------------
+void t2_t2() {
+    t2_s1.P();	// Wait for t2_t1 to be done with the lock
+    t2_l1.Acquire();
+    printf("%s: Lock %s acquired, waiting on %s\n",currentThread->getName(),
+	   t2_l1.getName(), t2_c1.getName());
+    t2_c1.Wait(&t2_l1);
+    printf("%s: Releasing Lock %s\n",currentThread->getName(),
+	   t2_l1.getName());
+    t2_l1.Release();
+}
+// --------------------------------------------------
+// Test 3 - see TestSuite() for details
+// --------------------------------------------------
+Lock t3_l1("t3_l1");		// For mutual exclusion
+Condition t3_c1("t3_c1");	// The condition variable to test
+Semaphore t3_s1("t3_s1",0);	// To ensure the Signal comes before the wait
+Semaphore t3_done("t3_done",0); // So that TestSuite knows when Test 3 is
+                                // done
+
+// --------------------------------------------------
+// t3_waiter()
+//     These threads will wait on the t3_c1 condition variable.  Only
+//     one t3_waiter will be released
+// --------------------------------------------------
+void t3_waiter() {
+    t3_l1.Acquire();
+    t3_s1.V();		// Let the signaller know we're ready to wait
+    printf("%s: Lock %s acquired, waiting on %s\n",currentThread->getName(),
+	   t3_l1.getName(), t3_c1.getName());
+    t3_c1.Wait(&t3_l1);
+    printf("%s: freed from %s\n",currentThread->getName(), t3_c1.getName());
+    t3_l1.Release();
+    t3_done.V();
+}
+
+
+// --------------------------------------------------
+// t3_signaller()
+//     This threads will signal the t3_c1 condition variable.  Only
+//     one t3_signaller will be released
+// --------------------------------------------------
+void t3_signaller() {
+
+    // Don't signal until someone's waiting
+    
+    for ( int i = 0; i < 5 ; i++ ) 
+	t3_s1.P();
+    t3_l1.Acquire();
+    printf("%s: Lock %s acquired, signalling %s\n",currentThread->getName(),
+	   t3_l1.getName(), t3_c1.getName());
+    t3_c1.Signal(&t3_l1);
+    printf("%s: Releasing %s\n",currentThread->getName(), t3_l1.getName());
+    t3_l1.Release();
+    t3_done.V();
+}
+ 
+// --------------------------------------------------
+// Test 4 - see TestSuite() for details
+// --------------------------------------------------
+Lock t4_l1("t4_l1");		// For mutual exclusion
+Condition t4_c1("t4_c1");	// The condition variable to test
+Semaphore t4_s1("t4_s1",0);	// To ensure the Signal comes before the wait
+Semaphore t4_done("t4_done",0); // So that TestSuite knows when Test 4 is
+                                // done
+
+// --------------------------------------------------
+// t4_waiter()
+//     These threads will wait on the t4_c1 condition variable.  All
+//     t4_waiters will be released
+// --------------------------------------------------
+void t4_waiter() {
+    t4_l1.Acquire();
+    t4_s1.V();		// Let the signaller know we're ready to wait
+    printf("%s: Lock %s acquired, waiting on %s\n",currentThread->getName(),
+	   t4_l1.getName(), t4_c1.getName());
+    t4_c1.Wait(&t4_l1);
+    printf("%s: freed from %s\n",currentThread->getName(), t4_c1.getName());
+    t4_l1.Release();
+    t4_done.V();
+}
+
+
+// --------------------------------------------------
+// t2_signaller()
+//     This thread will broadcast to the t4_c1 condition variable.
+//     All t4_waiters will be released
+// --------------------------------------------------
+void t4_signaller() {
+
+    // Don't broadcast until someone's waiting
+    
+    for ( int i = 0; i < 5 ; i++ ) 
+	t4_s1.P();
+    t4_l1.Acquire();
+    printf("%s: Lock %s acquired, broadcasting %s\n",currentThread->getName(),
+	   t4_l1.getName(), t4_c1.getName());
+    t4_c1.Broadcast(&t4_l1);
+    printf("%s: Releasing %s\n",currentThread->getName(), t4_l1.getName());
+    t4_l1.Release();
+    t4_done.V();
+}
+// --------------------------------------------------
+// Test 5 - see TestSuite() for details
+// --------------------------------------------------
+Lock t5_l1("t5_l1");		// For mutual exclusion
+Lock t5_l2("t5_l2");		// Second lock for the bad behavior
+Condition t5_c1("t5_c1");	// The condition variable to test
+Semaphore t5_s1("t5_s1",0);	// To make sure t5_t2 acquires the lock after
+                                // t5_t1
+
+// --------------------------------------------------
+// t5_t1() -- test 5 thread 1
+//     This thread will wait on a condition under t5_l1
+// --------------------------------------------------
+void t5_t1() {
+    t5_l1.Acquire();
+    t5_s1.V();	// release t5_t2
+    printf("%s: Lock %s acquired, waiting on %s\n",currentThread->getName(),
+	   t5_l1.getName(), t5_c1.getName());
+    t5_c1.Wait(&t5_l1);
+    printf("%s: Releasing Lock %s\n",currentThread->getName(),
+	   t5_l1.getName());
+    t5_l1.Release();
+}
+
+// --------------------------------------------------
+// t5_t1() -- test 5 thread 1
+//     This thread will wait on a t5_c1 condition under t5_l2, which is
+//     a Fatal error
+// --------------------------------------------------
+void t5_t2() {
+    t5_s1.P();	// Wait for t5_t1 to get into the monitor
+    t5_l1.Acquire();
+    t5_l2.Acquire();
+    printf("%s: Lock %s acquired, signalling %s\n",currentThread->getName(),
+	   t5_l2.getName(), t5_c1.getName());
+    t5_c1.Signal(&t5_l2);
+    printf("%s: Releasing Lock %s\n",currentThread->getName(),
+	   t5_l2.getName());
+    t5_l2.Release();
+    printf("%s: Releasing Lock %s\n",currentThread->getName(),
+	   t5_l1.getName());
+    t5_l1.Release();
+}
+
+// --------------------------------------------------
+// TestSuite()
+//     This is the main thread of the test suite.  It runs the
+//     following tests:
+//
+//       1.  Show that a thread trying to release a lock it does not
+//       hold does not work
+//
+//       2.  Show that Signals are not stored -- a Signal with no
+//       thread waiting is ignored
+//
+//       3.  Show that Signal only wakes 1 thread
+//
+//	 4.  Show that Broadcast wakes all waiting threads
+//
+//       5.  Show that Signalling a thread waiting under one lock
+//       while holding another is a Fatal error
+//
+//     Fatal errors terminate the thread in question.
+// --------------------------------------------------
+void TestSuite() {
+    Thread *t;
+    char *name;
+    int i;
+    
+    // Test 1
+
+    printf("Starting Test 1\n");
+
+    t = new Thread("t1_t1");
+    t->Fork((VoidFunctionPtr)t1_t1,0);
+
+    t = new Thread("t1_t2");
+    t->Fork((VoidFunctionPtr)t1_t2,0);
+
+    t = new Thread("t1_t3");
+    t->Fork((VoidFunctionPtr)t1_t3,0);
+
+    // Wait for Test 1 to complete
+    for (  i = 0; i < 2; i++ )
+	t1_done.P();
+
+    // Test 2
+
+    printf("Starting Test 2.  Note that it is an error if thread t2_t2\n");
+    printf("completes\n");
+
+    t = new Thread("t2_t1");
+    t->Fork((VoidFunctionPtr)t2_t1,0);
+
+    t = new Thread("t2_t2");
+    t->Fork((VoidFunctionPtr)t2_t2,0);
+
+    // Wait for Test 2 to complete
+    t2_done.P();
+
+    // Test 3
+
+    printf("Starting Test 3\n");
+
+    for (  i = 0 ; i < 5 ; i++ ) {
+	name = new char [20];
+	sprintf(name,"t3_waiter%d",i);
+	t = new Thread(name);
+	t->Fork((VoidFunctionPtr)t3_waiter,0);
+    }
+    t = new Thread("t3_signaller");
+    t->Fork((VoidFunctionPtr)t3_signaller,0);
+
+    // Wait for Test 3 to complete
+    for (  i = 0; i < 2; i++ )
+	t3_done.P();
+
+    // Test 4
+
+    printf("Starting Test 4\n");
+
+    for (  i = 0 ; i < 5 ; i++ ) {
+	name = new char [20];
+	sprintf(name,"t4_waiter%d",i);
+	t = new Thread(name);
+	t->Fork((VoidFunctionPtr)t4_waiter,0);
+    }
+    t = new Thread("t4_signaller");
+    t->Fork((VoidFunctionPtr)t4_signaller,0);
+
+    // Wait for Test 4 to complete
+    for (  i = 0; i < 6; i++ )
+	t4_done.P();
+
+    // Test 5
+
+    printf("Starting Test 5.  Note that it is an error if thread t5_t1\n");
+    printf("completes\n");
+
+    t = new Thread("t5_t1");
+    t->Fork((VoidFunctionPtr)t5_t1,0);
+
+    t = new Thread("t5_t2");
+    t->Fork((VoidFunctionPtr)t5_t2,0);
+
+}
+
 #endif
