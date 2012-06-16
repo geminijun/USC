@@ -34,6 +34,9 @@ class AddrSpace {
 
     void SaveState();			// Save/restore address space-specific
     void RestoreState();		// info on a context switch
+    int StackAllocation(int threadID);		// 
+	void StackDeallocation(int threadID);    
+    
     Table fileTable;			// Table of openfiles
 
  private:
@@ -41,6 +44,8 @@ class AddrSpace {
 					// for now!
     unsigned int numPages;		// Number of pages in the virtual 
 					// address space
+					
+	int stackPos[100];
 };
 
 #endif // ADDRSPACE_H

@@ -14,6 +14,7 @@
 #include "addrspace.h"
 #include "synch.h"
 #include "string.h"
+#include "exception.h"
 
 #define QUANTUM 100
 
@@ -36,7 +37,21 @@ StartProcess(char *filename)
     space = new AddrSpace(executable);
 
     currentThread->space = space;
+	
+	// create a process
+	ProcessEntry* newProcess = new ProcessEntry();
+	newProcess->totalNumOfThreads = 1;
+	newProcess->numOfExecutingThread = 1;
 
+	// put it into process table	
+	int id = processTable.Put(newProcess);
+	if (id == -1) { // failed
+		printf("Create process failed.\n");
+		delete newProcess;
+	}
+	printf("StartProcess: Create process success. process id is %d\n", id);
+	newProcess->processID = id;
+	
     delete executable;			// close file
 
     space->InitRegisters();		// set the initial register values

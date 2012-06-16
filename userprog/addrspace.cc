@@ -24,6 +24,14 @@
 
 extern "C" { int bzero(char *, int); };
 
+
+Lock newThreadStackAdditionLock("newstackaddlock");
+//int physicalMemoryPageFindNumber = 0;
+//int stackStartAddress = 0;
+int temp1,temp2;
+BitMap *stackPagesBitmap = new BitMap (16384);
+
+
 Table::Table(int s) : map(s), table(0), lock(0), size(s) {
     table = new void *[size];
     lock = new Lock("TableLock");
@@ -134,10 +142,13 @@ AddrSpace::AddrSpace(OpenFile *executable) : fileTable(MaxOpenFiles) {
     size = noffH.code.size + noffH.initData.size + noffH.uninitData.size ;
     numPages = divRoundUp(size, PageSize) + divRoundUp(UserStackSize,PageSize);
                                                 // we need to increase the size
-						// to leave room for the stack
-    size = numPages * PageSize;
+							// to leave room for the stack
 
-    ASSERT(numPages <= NumPhysPages);		// check we're not trying
+	int 	stackstart = numPages - (divRoundUp(UserStackSize,PageSize));
+ 
+    size = numPages * PageSize;
+	
+	ASSERT(numPages <= NumPhysPages);		// check we're not trying
 						// to run anything too big --
 						// at least until we have
 						// virtual memory
@@ -145,24 +156,34 @@ AddrSpace::AddrSpace(OpenFile *executable) : fileTable(MaxOpenFiles) {
     DEBUG('a', "Initializing address space, num pages %d, size %d\n", 
 					numPages, size);
 // first, set up the translation 
-    pageTable = new TranslationEntry[numPages];
+	int stackSize = divRoundUp(UserStackSize,PageSize); 
+    pageTable = new TranslationEntry[numPages + stackSize*100];
     for (i = 0; i < numPages; i++) {
+    
+    int phy = stackPagesBitmap->Find();
+    if (-1 == phy) {
+    	printf("AddrSpace: physical memory not enough.\n");
+    	return;
+    }
+    
 	pageTable[i].virtualPage = i;	// for now, virtual page # = phys page #
-	pageTable[i].physicalPage = i;
+	pageTable[i].physicalPage = phy;
 	pageTable[i].valid = TRUE;
 	pageTable[i].use = FALSE;
 	pageTable[i].dirty = FALSE;
 	pageTable[i].readOnly = FALSE;  // if the code segment was entirely on 
 					// a separate page, we could set its 
 					// pages to be read-only
+	executable->ReadAt(&(machine->mainMemory[phy * PageSize]),
+			 PageSize, noffH.code.inFileAddr + (i * PageSize));
     }
     
 // zero out the entire address space, to zero the unitialized data segment 
 // and the stack segment
-    bzero(machine->mainMemory, size);
+//    bzero(machine->mainMemory, size);
 
 // then, copy in the code and data segments into memory
-    if (noffH.code.size > 0) {
+/*    if (noffH.code.size > 0) {
         DEBUG('a', "Initializing code segment, at 0x%x, size %d\n", 
 			noffH.code.virtualAddr, noffH.code.size);
         executable->ReadAt(&(machine->mainMemory[noffH.code.virtualAddr]),
@@ -174,7 +195,7 @@ AddrSpace::AddrSpace(OpenFile *executable) : fileTable(MaxOpenFiles) {
         executable->ReadAt(&(machine->mainMemory[noffH.initData.virtualAddr]),
 			noffH.initData.size, noffH.initData.inFileAddr);
     }
-
+*/
 }
 
 //----------------------------------------------------------------------
@@ -244,4 +265,65 @@ void AddrSpace::RestoreState()
 {
     machine->pageTable = pageTable;
     machine->pageTableSize = numPages;
+}
+
+
+int AddrSpace::StackAllocation(int threadID)
+{
+//	int stackPos = -1;
+	int stackSize = divRoundUp(UserStackSize,PageSize); 
+	int stackEndIndex = numPages + stackSize; //the end index of the stack for this thread
+	int offset;
+	
+	printf("StackAllocation: stackSize %d\n", stackSize);
+
+	newThreadStackAdditionLock.Acquire();
+	
+	//int findEmptyMemoryPage = stackPagesBitmap->Find();
+	
+	//stackPos = (temp2 + ((findEmptyMemoryPage+1)*8)*PageSize) - 16;
+	
+	for(int i = numPages; i < stackEndIndex; i++)
+	{
+        DEBUG('a', "The index of the physical memory is %d.\n", offset);
+	offset = stackPagesBitmap->Find(); //Find an available physical memory page.
+	int count = offset;
+        if(count == -1)
+		{
+			printf("No enough physical memory to allocate for a stack.\n");
+			newThreadStackAdditionLock.Release();
+            return -1;
+        }
+
+				pageTable[i].virtualPage = i;
+                pageTable[i].physicalPage = count; //Allocate the physical mem page to one page of the stack.
+                pageTable[i].valid = TRUE;
+                pageTable[i].use = FALSE;
+                pageTable[i].dirty = FALSE;
+                pageTable[i].readOnly = FALSE;  // if the code segment was entirely on 
+                                                // a separate page, we could set its 
+                                                // pages to be read-only
+    }
+	
+	newThreadStackAdditionLock.Release();
+    //numPages = stackEndIndex;//update the numPages.
+//	stackPos = stackEndIndex*PageSize - 16;
+	numPages = stackEndIndex;//update the numPages.
+
+    machine->pageTableSize = numPages;
+    
+    stackPos[threadID] = numPages;
+
+	printf("StackAllocation: numPages %d\n", numPages);
+    return (stackEndIndex*PageSize - 16);
+}
+
+void AddrSpace::StackDeallocation(int threadID)
+{
+	int s = stackPos[threadID];
+	int stackSize = divRoundUp(UserStackSize,PageSize); 
+	for (int i=s; i<s+stackSize; i++) {
+		stackPagesBitmap->Clear(pageTable[i].physicalPage);
+	}
+	
 }

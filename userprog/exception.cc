@@ -37,6 +37,10 @@ Lock* cvTableLock = new Lock("cvTableLock");
 Table lockTable(MAX_LOCKS);
 Table cvTable(MAX_LOCKS);
 
+Table processTable(MAX_NUM_PROCESSES);
+Lock* processTableLock = new Lock("processTableLock");
+int numOfProcess = 0;
+
 int copyin(unsigned int vaddr, int len, char *buf) {
     // Copy len bytes from the current thread's virtual address vaddr.
     // Return the number of bytes so read, or -1 if an error occors.
@@ -253,10 +257,11 @@ int CreateLock_Syscall(int name, int len)
 	// put it into lock table	
 	int id = lockTable.Put(newLock);
 	if (id == -1) { // failed
-		DEBUG('a', "Create lock failed.\n");
+		printf("Create lock failed.\n");
 		delete newLock->lock;
 		delete newLock;
 	}
+	printf("Create lock success. lock id is %d\n", id);
 	
 	lockTableLock->Release();
 	return id;
@@ -276,6 +281,7 @@ void DestroyLock_Syscall(int id)
 			}
 			delete l;
 			lockTable.Remove(id);
+			printf("The lock %d is being deleted.\n", id);
 		} else { // someone else is still using the lock
 			printf("Couldn't destroy the lock.\n");
 			l->isToDelete = true;
@@ -294,9 +300,10 @@ void Acquire_Syscall(int id)
 		printf("The lock %d is not exist.\n", id);
 		lockTableLock->Release();
 	} else {
-		l->usrCount++;
+//		l->usrCount++;
 		lockTableLock->Release(); // must be released before acquire
 		l->lock->Acquire();
+		printf("The lock %d is acquired by %s.\n", id, currentThread->getName());
 	}
 }
 
@@ -308,12 +315,14 @@ void Release_Syscall(int id)
 	if(l == NULL) {
 		printf("The lock %d is not exist.\n", id);
 	} else {
+//		printf("If the lock %d holded by same thread.\n", id);
 		if (l->lock->owner == currentThread) {
-			l->usrCount--;
+//			l->usrCount--;
+			printf("Trying to release the lock %d.\n", id);
 			l->lock->Release();
 		} else {
-			DEBUG('a', "currentThread \"%s\" didn't hold the lock. The owner is \"%s\"\n",
-			  currentThread->getName(), l->lock->owner->getName());
+			printf("currentThread \"%s\" didn't hold the lock.\n",
+			  currentThread->getName());
 		}
 	}
 	
@@ -336,6 +345,8 @@ int CreateCondition_Syscall(int name, int len)
 		printf("Create condition variable failed.\n");
 		delete cv->cv;
 		delete cv;
+	} else {
+		printf("Create condition variable successful, id is %d.\n", id);
 	}
 	
 	cvTableLock->Release();
@@ -355,6 +366,7 @@ void DestroyCondition_Syscall(int id)
 			delete cv->cv;
 			delete cv;
 			cvTable.Remove(id);
+			printf("Destroying the condition variable %d.\n", id);
 		} else {
 			printf("Someone else is still using condition variable %d.\n", id);
 			cv->isToDelete = true;
@@ -375,13 +387,15 @@ void Wait_Syscall(int lockId, int cvId)
 		printf("Condition variable %d isn't exist.\n", cvId);
 		cvTableLock->Release();
 	} else {
-		cv->usrCount++;
+//		cv->usrCount++;
 		cvTableLock->Release(); // must be released before wait
+		printf("Condition variable %d is waiting.\n", cvId);
 		cv->cv->Wait(l->lock);
 		
 		// reduce the count when wake up
 		cvTableLock->Acquire();
-		cv->usrCount--;
+		printf("Condition variable %d is waked up by someone.\n", cvId);
+//		cv->usrCount--;
 		cvTableLock->Release();
 	}
 }
@@ -397,6 +411,7 @@ void Signal_Syscall(int lockId, int cvId)
 		printf("Condition variable %d isn't exist.\n", cvId);
 	} else {
 		cv->cv->Signal(l->lock);
+		printf("Sending signal to Condition variable %d\n", cvId);
 	}
 
 	cvTableLock->Release();
@@ -418,6 +433,197 @@ void Broadcast_Syscall(int lockId, int cvId)
 	cvTableLock->Release();
 }
 
+void Yield_Syscall()
+{
+	//this system call just Yields the CPU and simulates a time slice
+	printf("Yield_Syscall\n");
+	currentThread->Yield();
+}
+
+void kernel_thread(unsigned int vaddr)
+{
+
+//	currentThread->space->InitRegisters();//initialize registers to 0
+	
+	// write virtual address to PCReg
+	machine->WriteRegister(PCReg, vaddr);
+	// write next instruction virtual address
+	machine->WriteRegister(NextPCReg, vaddr+4);
+	
+	
+	printf("ayush123\n");
+	int stackPos = currentThread->space->StackAllocation(currentThread->threadID);//get some stack space
+	
+	// Write stack position
+	machine->WriteRegister(StackReg, stackPos);
+
+//	printf("kernel_thread: numPages %d\n", currentThread->space->numPages);
+
+	// prevent information loss
+	currentThread->space->RestoreState();	
+
+//	printf("kernel_thread: numPages %d\n", currentThread->space->numPages);
+
+	machine->Run();
+}
+
+void Fork_Syscall(unsigned int vaddr)
+{
+	// validation
+	if ((vaddr <= 0) || ((vaddr%4) != 0)) {
+		printf("Fork_Syscall: Invalid vaddr: %d\n", vaddr);
+		return;
+	}
+	
+	Thread* t = new Thread("Thread");
+	
+	// Get process Table
+	processTableLock->Acquire();
+	ProcessEntry* process = (ProcessEntry *)processTable.Get(currentThread->processID);
+	if (process == NULL) {
+		printf("Fork_Syscall: Impossible error. %d\n", currentThread->processID);
+		return;
+	}
+	
+	// Update the process thread info
+	t->processID = currentThread->processID;
+	t->threadID = process->totalNumOfThreads;
+	process->totalNumOfThreads++;
+	process->numOfExecutingThread++;
+	
+	// Update page table
+	
+	t->space = currentThread->space;
+	
+	processTableLock->Release();	
+
+	printf("Fork_Syscall: Fork a new thread %d\n", t->threadID);
+
+	t->Fork((VoidFunctionPtr)kernel_thread, vaddr);
+}
+
+void exec_thread(unsigned int vaddr)
+{
+	currentThread->space->InitRegisters();
+
+	currentThread->space->RestoreState();
+	
+	machine->Run();
+}
+
+void Exec_Syscall(unsigned int vaddr, int len)
+{
+
+	if ((vaddr <= 0) || ((vaddr%4) != 0)) {
+		printf("Exec_Syscall: Invalid vaddr: %d\n", vaddr);
+		return;
+	}
+	
+    char *buf = new char[len+1];	// Kernel buffer to put the name in
+
+    if (!buf) return;
+
+    if( copyin(vaddr,len,buf) == -1 ) {
+	printf("Exec_Syscall: Bad pointer passed to Create\n");
+	delete buf;
+	return;
+    }
+
+    buf[len]='\0';
+
+	OpenFile* exe = fileSystem->Open(buf);
+	if (exe == NULL) {
+		printf("Exec_Syscall: Open file %s failed.\n", buf);
+		delete buf;
+		return;
+	}
+	delete buf;
+	
+	// update process table
+	processTableLock->Acquire();
+	
+	// create a process
+	ProcessEntry* newProcess = new ProcessEntry();
+	newProcess->totalNumOfThreads = 1;
+	newProcess->numOfExecutingThread = 1;
+
+	// put it into process table	
+	int id = processTable.Put(newProcess);
+	if (id == -1) { // failed
+		printf("Exec_Syscall: Create process failed.\n");
+		delete buf;
+		delete exe;
+		delete newProcess;
+		return;
+	}
+	printf("Exec_Syscall: Create process success. process id is %d\n", id);
+	newProcess->processID = id;
+	
+	numOfProcess++;
+
+	processTableLock->Release();
+	
+	// new process main thread
+	Thread* t = new Thread("Main thread");
+	
+	// create space for this process
+	AddrSpace* space = new AddrSpace(exe);
+	
+	t->space = space;	
+	t->threadID = 0;
+	t->processID = id;
+	
+	// new PageTable
+	
+	// code & data
+	
+	
+	delete buf;
+	delete exe;
+
+	t->Fork((VoidFunctionPtr)exec_thread, 0);
+}	
+
+void Exit_Syscall(int status)
+{
+	printf("Thread is exiting.\n");
+	if(status != 0) {
+		printf("Thread exit status: %d\n", status);
+		return;
+	}
+	
+	//
+	processTableLock->Acquire();
+	ProcessEntry* process = (ProcessEntry *)processTable.Get(currentThread->processID);
+	if (process == NULL) {
+		printf("Exit_Syscall: Impossible error. %d\n", currentThread->processID);
+		return;
+	}
+	
+	process->numOfExecutingThread--;
+	numOfProcess--;
+	if(process->numOfExecutingThread == 0) { // last thread
+		
+		processTable.Remove(currentThread->processID);
+		currentThread->space->StackDeallocation(currentThread->threadID);
+		delete currentThread->space;
+		
+		// release other resource
+		
+		if (numOfProcess == 0){ // last process
+			processTableLock->Release();
+			interrupt->Halt();		
+		}
+	} else {
+		// delete stack pages
+		currentThread->space->StackDeallocation(currentThread->threadID);
+	}
+	
+	processTableLock->Release();
+	currentThread->Finish();
+	
+	return;
+}
 
 void ExceptionHandler(ExceptionType which) {
     int type = machine->ReadRegister(2); // Which syscall?
@@ -479,7 +685,7 @@ void ExceptionHandler(ExceptionType which) {
 		break;
 	    case SC_DestroyCondition:
 		DEBUG('a', "Destroy condition variable syscall.\n");
-		DestroyLock_Syscall(machine->ReadRegister(4));
+		DestroyCondition_Syscall(machine->ReadRegister(4));
 		break;
 	    case SC_Wait:
 		DEBUG('a', "Wait condition variable syscall.\n");
@@ -492,6 +698,23 @@ void ExceptionHandler(ExceptionType which) {
 	    case SC_Broadcast:
 		DEBUG('a', "Broadcast condition variable syscall.\n");
 		Broadcast_Syscall(machine->ReadRegister(4), machine->ReadRegister(5));
+		break;
+
+	    case SC_Yield:
+		DEBUG('a', "Yield thread syscall.\n");
+		Yield_Syscall();
+		break;
+	    case SC_Exec:
+		DEBUG('a', "Exec process syscall.\n");
+		Exec_Syscall(machine->ReadRegister(4), machine->ReadRegister(5));
+		break;
+	    case SC_Fork:
+		DEBUG('a', "Fork thread syscall.\n");
+		Fork_Syscall(machine->ReadRegister(4));
+		break;
+	    case SC_Exit:
+		DEBUG('a', "Exit thread syscall.\n");
+		Exit_Syscall(machine->ReadRegister(4));
 		break;
 	}
 

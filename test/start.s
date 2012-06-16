@@ -178,13 +178,13 @@ CreateLock:
 	j	$31
 	.end CreateLock
 
-	.globl DestoryLock
-	.ent	DestoryLock
-DestoryLock:
-	addiu $2,$0,SC_DestoryLock
+	.globl DestroyLock
+	.ent	DestroyLock
+DestroyLock:
+	addiu $2,$0,SC_DestroyLock
 	syscall
 	j	$31
-	.end DestoryLock
+	.end DestroyLock
 
 	.globl CreateCondition
 	.ent	CreateCondition

@@ -31,7 +31,7 @@ CPP = $(GCCDIR)cpp
 INCDIR =-I../userprog -I../threads
 CFLAGS = -G 0 -c $(INCDIR)
 
-all: halt matmult sort testfiles
+all: halt matmult sort testfiles locktest cvtest testcode exec testp1p2
 
 start.o: start.s ../userprog/syscall.h
 	$(CPP) $(CPPFLAGS) start.s > strt.s
@@ -61,6 +61,36 @@ testfiles.o: testfiles.c
 testfiles: testfiles.o start.o
 	$(LD) $(LDFLAGS) start.o testfiles.o -o testfiles.coff
 	../bin/coff2noff testfiles.coff testfiles
+
+locktest.o: locktest.c
+	$(CC) $(CFLAGS) -c locktest.c
+locktest: locktest.o start.o
+	$(LD) $(LDFLAGS) start.o locktest.o -o locktest.coff
+	../bin/coff2noff locktest.coff locktest
+
+cvtest.o: cvtest.c
+	$(CC) $(CFLAGS) -c cvtest.c
+cvtest: cvtest.o start.o
+	$(LD) $(LDFLAGS) start.o cvtest.o -o cvtest.coff
+	../bin/coff2noff cvtest.coff cvtest
+
+testcode.o: testcode.c
+	$(CC) $(CFLAGS) -c testcode.c
+testcode: testcode.o start.o
+	$(LD) $(LDFLAGS) start.o testcode.o -o testcode.coff
+	../bin/coff2noff testcode.coff testcode
+
+exec.o: exec.c
+	$(CC) $(CFLAGS) -c exec.c
+exec: exec.o start.o
+	$(LD) $(LDFLAGS) start.o exec.o -o exec.coff
+	../bin/coff2noff exec.coff exec
+
+testp1p2.o: testp1p2.c
+	$(CC) $(CFLAGS) -c testp1p2.c
+testp1p2: testp1p2.o start.o
+	$(LD) $(LDFLAGS) start.o testp1p2.o -o testp1p2.coff
+	../bin/coff2noff testp1p2.coff testp1p2
 
 clean:
 	rm -f *.o *.coff

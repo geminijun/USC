@@ -70,7 +70,7 @@ typedef int SpaceId;
 /* Run the executable, stored in the Nachos file "name", and return the 
  * address space identifier
  */
-SpaceId Exec(char *name);
+SpaceId Exec(char *name, int len);
  
 /* Only return once the the user program "id" has finished.  
  * Return the exit status.
@@ -137,16 +137,16 @@ void Fork(void (*func)());
  */
 void Yield();		
 
-int CreateLock(char *name);
+int CreateLock(char* name, int len);
 void Acquire(int id);
 void Release(int id);
 void DeleteLock(int id);
 
-int CreateCondition(char *name);
-void Wait(int id);
-void Signal(int id);
-void Broadcast(int id);
-void DeleteCondition(int id);
+int CreateCondition(char* name, int len);
+void Wait(int lockId, int cvId);
+void Signal(int lockId, int cvId);
+void Broadcast(int lockid, int cvId);
+void DestroyCondition(int id);
 
 #endif /* IN_ASM */
 
